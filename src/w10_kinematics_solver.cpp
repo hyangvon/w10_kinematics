@@ -24,7 +24,9 @@ bool W10KinematicsSolver::forwardKinematics(const VectorXd& q, Eigen::Affine3d& 
   
   // Get the end-effector frame (last body)
   int ee_frame_id = model_.nframes - 1;
-  T = data_.oMi[model_.frames[ee_frame_id].parent];
+  pinocchio::SE3 se3 = data_.oMi[model_.frames[ee_frame_id].parent];
+  T = Eigen::Affine3d(se3.rotation());
+  T.translation() = se3.translation();
   
   return true;
 }
@@ -45,6 +47,11 @@ bool W10KinematicsSolver::inverseKinematics(
   
   // This is a placeholder for arm angle dimension reduction IK
   // The actual implementation will use the specific arm angle reduction method
+  // Parameters tolerance and max_iterations will be used in the actual algorithm
+  static_cast<void>(tolerance);
+  static_cast<void>(max_iterations);
+  static_cast<void>(T_target);
+  
   // TODO: Implement arm angle dimension reduction algorithm
   
   std::cout << "IK solver using arm angle dimension reduction (placeholder)" << std::endl;
@@ -52,13 +59,13 @@ bool W10KinematicsSolver::inverseKinematics(
   return true;
 }
 
-VectorXd W10KinematicsSolver::reduceArmAngle(const VectorXd& q_full) {
+W10KinematicsSolver::VectorXd W10KinematicsSolver::reduceArmAngle(const VectorXd& q_full) {
   // TODO: Implement arm angle dimension reduction
   // This should reduce the configuration space by eliminating redundant DOF
   return q_full;
 }
 
-VectorXd W10KinematicsSolver::expandArmAngle(const VectorXd& q_reduced) {
+W10KinematicsSolver::VectorXd W10KinematicsSolver::expandArmAngle(const VectorXd& q_reduced) {
   // TODO: Implement arm angle dimension expansion
   return q_reduced;
 }
