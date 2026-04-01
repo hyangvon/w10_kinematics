@@ -11,42 +11,4 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
-# Special handling for Eigen3 as it's often header-only
-find_package(Eigen3 REQUIRED NO_MODULE)
-include_directories(${EIGEN3_INCLUDE_DIRS})
-
-# Include directories
-include_directories(include)
-
-# Create kinematics library
-ament_auto_add_library(w10_kinematics_lib
-  src/w10_kinematics_solver.cpp
-)
-
-# Build executables
-ament_auto_add_executable(w10_ik_node src/w10_ik_node.cpp)
-target_link_libraries(w10_ik_node w10_kinematics_lib)
-
-ament_auto_add_executable(w10_ik_test src/w10_ik_test.cpp)
-target_link_libraries(w10_ik_test w10_kinematics_lib)
-
-# Install headers
-install(DIRECTORY include/
-  DESTINATION include
-)
-
-# Install executables
-install(TARGETS w10_ik_node w10_ik_test
-  DESTINATION lib/${PROJECT_NAME}
-)
-
-# Install launch and config files
-install(DIRECTORY launch
-  DESTINATION share/${PROJECT_NAME}
-)
-
-install(DIRECTORY config
-  DESTINATION share/${PROJECT_NAME}
-)
-
 ament_package()
