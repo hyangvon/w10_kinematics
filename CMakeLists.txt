@@ -25,11 +25,19 @@ ament_auto_add_library(w10_kinematics_lib
 
 # Build executables
 ament_auto_add_executable(w10_ik_node src/w10_ik_node.cpp)
+target_link_libraries(w10_ik_node w10_kinematics_lib)
+
 ament_auto_add_executable(w10_ik_test src/w10_ik_test.cpp)
+target_link_libraries(w10_ik_test w10_kinematics_lib)
 
 # Install headers
 install(DIRECTORY include/
   DESTINATION include
+)
+
+# Install executables
+install(TARGETS w10_ik_node w10_ik_test
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 # Install launch and config files
