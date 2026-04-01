@@ -14,6 +14,8 @@ ament_auto_find_build_dependencies()
 find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(pinocchio REQUIRED)
 find_package(w10_sim REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
 
 # Include directories
 include_directories(include)
@@ -37,6 +39,31 @@ target_link_libraries(ik_test
   pinocchio::pinocchio
 )
 
+add_executable(find_arm_angle src/find_arm_angle.cpp)
+target_link_libraries(find_arm_angle
+  arm_angle_ik
+  Eigen3::Eigen
+  pinocchio::pinocchio
+)
+
+add_executable(debug_positions src/debug_positions.cpp)
+target_link_libraries(debug_positions
+  arm_angle_ik
+  Eigen3::Eigen
+  pinocchio::pinocchio
+)
+
+add_executable(ik_visualize src/ik_visualize.cpp)
+target_link_libraries(ik_visualize
+  arm_angle_ik
+  Eigen3::Eigen
+  pinocchio::pinocchio
+)
+ament_target_dependencies(ik_visualize
+  rclcpp
+  sensor_msgs
+)
+
 # Install library
 install(TARGETS arm_angle_ik
   LIBRARY DESTINATION lib
@@ -48,8 +75,13 @@ install(DIRECTORY include/
   DESTINATION include
 )
 
+# Install launch files
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch
+)
+
 # Install executables
-install(TARGETS ik_test
+install(TARGETS ik_test ik_visualize
   DESTINATION lib/${PROJECT_NAME}
 )
 

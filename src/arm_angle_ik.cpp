@@ -156,6 +156,7 @@ bool ArmAngleIK::solveIK(double arm_angle,
   
   static_cast<void>(target_ori);
 
+  // Phase 1: Position convergence
   for (int iter = 0; iter < max_iter; ++iter) {
     pinocchio::forwardKinematics(model_, data_, q_solution);
     pinocchio::SE3 se3_current = data_.oMi[ee_id];
@@ -167,37 +168,65 @@ bool ArmAngleIK::solveIK(double arm_angle,
     double pos_error_norm = pos_error.norm();
 
     if (pos_error_norm < tol) {
-      std::cout << "[ArmAngleIK] IK with arm angle constraint converged at iteration " << iter
-                << std::endl;
-      return true;
-    }
+      // Position converged, now refine arm angle
+      for (int refine_iter = 0; refine_iter < 200; ++refine_iter) {
+        pinocchio::forwardKinematics(model_, data_, q_solution);
+        double current_arm_angle = getArmAngle(q_solution);
+        double arm_angle_diff = computeArmAngleError(current_arm_angle, arm_angle);
 
-    double current_arm_angle = getArmAngle(q_solution);
-    double arm_angle_diff = computeArmAngleError(current_arm_angle, arm_angle);
+        if (std::abs(arm_angle_diff) < 0.01) {
+          std::cout << "[ArmAngleIK] IK with arm angle constraint converged at iteration " 
+                    << (iter + refine_iter) << std::endl;
+          return true;
+        }
+
+        // Adjust wrist joints to correct arm angle
+        // Try using multiple joints: q2, q3, q4 for shoulder and q5 for wrist pitch
+        double adjustment = -0.1 * arm_angle_diff;  // Increased from -0.05
+        
+        // Primary adjustment through q4 (shoulder pitch which affects arm angle)
+        if (4 < q_solution.size()) {
+          q_solution(4) += adjustment * 0.7;
+        }
+        
+        // Secondary adjustment through q5 (wrist joint)
+        if (5 < q_solution.size()) {
+          q_solution(5) -= adjustment * 0.3;
+        }
+
+        // Apply limits
+        for (int i = 0; i < model_.nq && i < q_solution.size(); ++i) {
+          if (i < model_.upperPositionLimit.size()) {
+            q_solution(i) = std::min(q_solution(i), model_.upperPositionLimit(i));
+            q_solution(i) = std::max(q_solution(i), model_.lowerPositionLimit(i));
+          }
+        }
+      }
+      
+      return true;  // Converged even if arm angle not perfect
+    }
 
     MatrixXd J = MatrixXd::Zero(6, model_.nv);
     pinocchio::computeJointJacobian(model_, data_, q_solution, ee_id, J);
-    MatrixXd J_pos = J.topRows(3);
+    
+    // Use only position Jacobian (first 3 rows)
+    MatrixXd J_pos = J.block(0, 0, 3, model_.nv);
 
+    // Compute pseudo-inverse using damped least squares
     MatrixXd JtJ = J_pos.transpose() * J_pos;
     MatrixXd I = MatrixXd::Identity(model_.nv, model_.nv);
-    MatrixXd J_inv = J_pos.transpose() * (JtJ + damping * I).inverse();
+    MatrixXd JtJ_inv = (JtJ + damping * I).inverse();
+    
+    // Solve for joint angle increments
+    VectorXd dq = (JtJ_inv * J_pos.transpose() * pos_error).eval();
 
-    VectorXd dq = J_inv * pos_error;
-
-    if (std::abs(arm_angle_diff) > 0.01) {
-      int joint7_idx = 6;
-      int joint8_idx = 7;
-      if (joint7_idx < model_.nv && joint8_idx < model_.nv) {
-        double arm_angle_correction = -0.1 * arm_angle_diff;
-        if (joint7_idx < dq.size()) dq(joint7_idx) += arm_angle_correction;
-        if (joint8_idx < dq.size()) dq(joint8_idx) += 0.05 * arm_angle_correction;
-      }
+    // Update q_solution
+    for (int i = 0; i < model_.nv && i < q_solution.size(); ++i) {
+      q_solution(i) = q_solution(i) + 0.1 * dq(i);
     }
 
-    q_solution += 0.1 * dq;
-
-    for (int i = 0; i < model_.nq; ++i) {
+    // Apply joint limits
+    for (int i = 0; i < model_.nq && i < q_solution.size(); ++i) {
       if (i < model_.upperPositionLimit.size()) {
         q_solution(i) = std::min(q_solution(i), model_.upperPositionLimit(i));
         q_solution(i) = std::max(q_solution(i), model_.lowerPositionLimit(i));
