@@ -24,11 +24,13 @@ public:
 
     RCLCPP_INFO(this->get_logger(), "IK Visualizer initialized with %d DOF", ndof_);
     
-    // Initialize joint names based on W10 URDF
-    joint_names_ = {
-      "joint0", "joint1", "joint2", "joint3", "joint4", "joint5",
-      "joint6", "joint7", "joint8", "joint9", "joint10"
-    };
+    // Initialize joint names from the loaded model
+    joint_names_ = ik_solver_->getJointNames();
+    
+    RCLCPP_INFO(this->get_logger(), "Joint names (%zu joints): ", joint_names_.size());
+    for (size_t i = 0; i < joint_names_.size(); ++i) {
+      RCLCPP_INFO(this->get_logger(), "  [%zu] %s", i, joint_names_[i].c_str());
+    }
 
     current_state_ = 0;
   }
@@ -38,102 +40,166 @@ private:
     auto msg = sensor_msgs::msg::JointState();
     msg.header.stamp = this->now();
     msg.name = joint_names_;
-    msg.position.resize(ndof_);
-    msg.velocity.resize(ndof_, 0.0);
-    msg.effort.resize(ndof_, 0.0);
+    int num_joints = joint_names_.size();
+    msg.position.resize(num_joints);
+    msg.velocity.resize(num_joints, 0.0);
+    msg.effort.resize(num_joints, 0.0);
 
     // Generate different IK solutions cyclically
     switch (current_state_) {
       case 0: {
-        // State 0: Zero configuration (origin state)
-        RCLCPP_INFO(this->get_logger(), "\n=== State 0: Zero Configuration ===");
-        for (int i = 0; i < ndof_; ++i) {
-          msg.position[i] = 0.0;
+        RCLCPP_INFO(this->get_logger(), "\n=== STATE 0: IK Solving from Perturbed Config ===");
+        
+        Eigen::VectorXd q_init = Eigen::VectorXd::Zero(ndof_);
+        q_init(4) = 0.5;
+        q_init(5) = 0.3;
+        q_init(6) = -0.8;
+        
+        Eigen::VectorXd q_solution;
+        Eigen::Vector3d target_pos(0.0, 0.0, 0.7698);
+        Eigen::Matrix3d target_ori = Eigen::Matrix3d::Identity();
+        double target_arm_angle = 0.5;
+        
+        RCLCPP_INFO(this->get_logger(), "Initial Config: q2=0.5, q3=0.3, q4=-0.8");
+        RCLCPP_INFO(this->get_logger(), "Target Position: [%.4f, %.4f, %.4f]",
+            target_pos(0), target_pos(1), target_pos(2));
+        RCLCPP_INFO(this->get_logger(), "Solving IK...");
+        
+        bool success = ik_solver_->solveIK(
+            target_arm_angle, target_pos, target_ori, q_init, q_solution, 1e-5, 1000);
+        
+        if (success) {
+          RCLCPP_INFO(this->get_logger(), "✓ IK CONVERGED");
+          publishJointState(q_solution, msg);
+          
+          Eigen::Isometry3d T_verify;
+          if (ik_solver_->forwardKinematics(q_solution, T_verify)) {
+            Eigen::Vector3d pos_error = target_pos - T_verify.translation();
+            double error_norm = pos_error.norm();
+            
+            RCLCPP_INFO(this->get_logger(), "Verification (FK):");
+            RCLCPP_INFO(this->get_logger(), "  Achieved Position: [%.4f, %.4f, %.4f]",
+                T_verify.translation()(0), T_verify.translation()(1), T_verify.translation()(2));
+            RCLCPP_INFO(this->get_logger(), "  Position Error: %.2e m", error_norm);
+          }
+        } else {
+          RCLCPP_WARN(this->get_logger(), "✗ IK FAILED");
+          Eigen::VectorXd q_zero = Eigen::VectorXd::Zero(ndof_);
+          publishJointState(q_zero, msg);
         }
-        RCLCPP_INFO(this->get_logger(), "EE Position: [0, 0, 0.7698], Arm Angle: 90° (τ/2)");
         break;
       }
       
       case 1: {
-        // State 1: IK to same position but with shoulder adjustment
-        RCLCPP_INFO(this->get_logger(), "\n=== State 1: IK Solution (q2=0.3, q3=0.2, q4=-0.5) ===");
+        RCLCPP_INFO(this->get_logger(), "\n=== STATE 1: IK Solving from Different Initial Config ===");
+        
         Eigen::VectorXd q_init = Eigen::VectorXd::Zero(ndof_);
-        Eigen::VectorXd q_solution = Eigen::VectorXd::Zero(ndof_);
+        q_init(4) = -0.4;
+        q_init(5) = -0.2;
+        q_init(6) = 0.6;
         
-        // Use known working configuration from ik_test
-        q_solution(2) = 0.3;
-        q_solution(3) = 0.2;
-        q_solution(4) = -0.5;
+        Eigen::VectorXd q_solution;
+        Eigen::Vector3d target_pos(0.0, 0.0, 0.7698);
+        Eigen::Matrix3d target_ori = Eigen::Matrix3d::Identity();
+        double target_arm_angle = 0.3;
         
-        for (int i = 0; i < ndof_; ++i) {
-          msg.position[i] = q_solution(i);
-        }
+        RCLCPP_INFO(this->get_logger(), "Initial Config: q2=-0.4, q3=-0.2, q4=0.6");
+        RCLCPP_INFO(this->get_logger(), "Target Position: [%.4f, %.4f, %.4f]",
+            target_pos(0), target_pos(1), target_pos(2));
+        RCLCPP_INFO(this->get_logger(), "Solving IK...");
         
-        Eigen::Isometry3d T;
-        if (ik_solver_->forwardKinematics(q_solution, T)) {
-          RCLCPP_INFO(this->get_logger(), "EE Position: [%.4f, %.4f, %.4f]",
-              T.translation()(0), T.translation()(1), T.translation()(2));
-          RCLCPP_INFO(this->get_logger(), "Arm Angle: %.4f rad (%.2f deg)",
-              ik_solver_->getArmAngle(q_solution),
-              ik_solver_->getArmAngle(q_solution) * 180.0 / M_PI);
+        bool success = ik_solver_->solveIK(
+            target_arm_angle, target_pos, target_ori, q_init, q_solution, 1e-5, 1000);
+        
+         if (success) {
+          RCLCPP_INFO(this->get_logger(), "✓ IK CONVERGED");
+          publishJointState(q_solution, msg);
+          
+          Eigen::Isometry3d T_verify;
+          if (ik_solver_->forwardKinematics(q_solution, T_verify)) {
+            Eigen::Vector3d pos_error = target_pos - T_verify.translation();
+            double error_norm = pos_error.norm();
+            
+            RCLCPP_INFO(this->get_logger(), "Verification (FK):");
+            RCLCPP_INFO(this->get_logger(), "  Achieved Position: [%.4f, %.4f, %.4f]",
+                T_verify.translation()(0), T_verify.translation()(1), T_verify.translation()(2));
+            RCLCPP_INFO(this->get_logger(), "  Position Error: %.2e m", error_norm);
+          }
+        } else {
+          RCLCPP_WARN(this->get_logger(), "✗ IK FAILED");
+          Eigen::VectorXd q_zero = Eigen::VectorXd::Zero(ndof_);
+          publishJointState(q_zero, msg);
         }
         break;
       }
       
       case 2: {
-        // State 2: Partially bent configuration
-        RCLCPP_INFO(this->get_logger(), "\n=== State 2: Bent Configuration (q2=-0.3, q3=-0.2, q4=0.8) ===");
-        Eigen::VectorXd q_solution = Eigen::VectorXd::Zero(ndof_);
+        RCLCPP_INFO(this->get_logger(), "\n=== STATE 2: IK Solving from Large Perturbation ===");
         
-        q_solution(2) = -0.3;
-        q_solution(3) = -0.2;
-        q_solution(4) = 0.8;
+        Eigen::VectorXd q_init = Eigen::VectorXd::Zero(ndof_);
+        q_init(4) = -0.7;
+        q_init(5) = 0.5;
+        q_init(6) = -1.0;
+        q_init(7) = 0.8;
         
-        for (int i = 0; i < ndof_; ++i) {
-          msg.position[i] = q_solution(i);
-        }
+        Eigen::VectorXd q_solution;
+        Eigen::Vector3d target_pos(0.0, 0.0, 0.7698);
+        Eigen::Matrix3d target_ori = Eigen::Matrix3d::Identity();
+        double target_arm_angle = 0.0;
         
-        Eigen::Isometry3d T;
-        if (ik_solver_->forwardKinematics(q_solution, T)) {
-          RCLCPP_INFO(this->get_logger(), "EE Position: [%.4f, %.4f, %.4f]",
-              T.translation()(0), T.translation()(1), T.translation()(2));
-          RCLCPP_INFO(this->get_logger(), "Arm Angle: %.4f rad (%.2f deg)",
-              ik_solver_->getArmAngle(q_solution),
-              ik_solver_->getArmAngle(q_solution) * 180.0 / M_PI);
+        RCLCPP_INFO(this->get_logger(), "Initial Config: q2=-0.7, q3=0.5, q4=-1.0, q5=0.8");
+        RCLCPP_INFO(this->get_logger(), "Target Position: [%.4f, %.4f, %.4f]",
+            target_pos(0), target_pos(1), target_pos(2));
+        RCLCPP_INFO(this->get_logger(), "Solving IK...");
+        
+        bool success = ik_solver_->solveIK(
+            target_arm_angle, target_pos, target_ori, q_init, q_solution, 1e-5, 1000);
+        
+        if (success) {
+          RCLCPP_INFO(this->get_logger(), "✓ IK CONVERGED");
+          publishJointState(q_solution, msg);
+          
+          Eigen::Isometry3d T_verify;
+          if (ik_solver_->forwardKinematics(q_solution, T_verify)) {
+            Eigen::Vector3d pos_error = target_pos - T_verify.translation();
+            double error_norm = pos_error.norm();
+            
+            RCLCPP_INFO(this->get_logger(), "Verification (FK):");
+            RCLCPP_INFO(this->get_logger(), "  Achieved Position: [%.4f, %.4f, %.4f]",
+                T_verify.translation()(0), T_verify.translation()(1), T_verify.translation()(2));
+            RCLCPP_INFO(this->get_logger(), "  Position Error: %.2e m", error_norm);
+          }
+        } else {
+          RCLCPP_WARN(this->get_logger(), "✗ IK FAILED");
+          Eigen::VectorXd q_zero = Eigen::VectorXd::Zero(ndof_);
+          publishJointState(q_zero, msg);
         }
         break;
       }
       
       case 3: {
-        // State 3: Custom configuration with wrist adjustments
-        RCLCPP_INFO(this->get_logger(), "\n=== State 3: Configuration with Wrist Adjustment ===");
-        Eigen::VectorXd q_solution = Eigen::VectorXd::Zero(ndof_);
+        RCLCPP_INFO(this->get_logger(), "\n=== STATE 3: Zero Configuration ===");
         
-        q_solution(2) = 0.2;
-        q_solution(3) = 0.1;
-        q_solution(4) = -0.4;
-        q_solution(5) = 0.3;  // Wrist pitch
-        
-        for (int i = 0; i < ndof_; ++i) {
-          msg.position[i] = q_solution(i);
-        }
-        
-        Eigen::Isometry3d T;
-        if (ik_solver_->forwardKinematics(q_solution, T)) {
-          RCLCPP_INFO(this->get_logger(), "EE Position: [%.4f, %.4f, %.4f]",
-              T.translation()(0), T.translation()(1), T.translation()(2));
-          RCLCPP_INFO(this->get_logger(), "Arm Angle: %.4f rad (%.2f deg)",
-              ik_solver_->getArmAngle(q_solution),
-              ik_solver_->getArmAngle(q_solution) * 180.0 / M_PI);
-        }
+        Eigen::VectorXd q_zero = Eigen::VectorXd::Zero(ndof_);
+        publishJointState(q_zero, msg);
         break;
       }
     }
-
+    
     joint_state_pub_->publish(msg);
     
     // Cycle through states
     current_state_ = (current_state_ + 1) % 4;
+  }
+  
+  void publishJointState(const Eigen::VectorXd& q_solution, sensor_msgs::msg::JointState& msg) {
+    // Extract joint values using the correct mapping  from Pinocchio q to ROS joint_state
+    std::vector<double> joint_values = ik_solver_->extractJointValuesForROS(q_solution);
+    
+    int num_joints = joint_names_.size();
+    for (int i = 0; i < num_joints && i < (int)joint_values.size(); ++i) {
+      msg.position[i] = joint_values[i];
+    }
   }
 
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;

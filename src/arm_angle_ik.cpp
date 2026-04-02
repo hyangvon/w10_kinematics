@@ -13,6 +13,58 @@ ArmAngleIK::ArmAngleIK(const std::string& urdf_path) : data_(model_) {
   std::cout << "[ArmAngleIK] DOF: " << model_.nq << ", Bodies: " << model_.nbodies << std::endl;
 }
 
+std::vector<std::string> ArmAngleIK::getJointNames() const {
+  std::vector<std::string> joint_names;
+  // Skip the first joint which is typically a fixed base joint
+  for (size_t i = 1; i < model_.joints.size(); ++i) {
+    joint_names.push_back(model_.names[i]);
+  }
+  return joint_names;
+}
+
+int ArmAngleIK::getNumActiveJoints() const {
+  // Count non-fixed joints
+  int count = 0;
+  for (size_t i = 1; i < model_.joints.size(); ++i) {
+    if (model_.joints[i].nv() > 0) {  // nv() = 0 for fixed joints
+      count += model_.joints[i].nv();
+    }
+  }
+  return count;
+}
+
+std::vector<double> ArmAngleIK::extractJointValuesForROS(const Eigen::VectorXd& q) const {
+  std::vector<double>result;
+  
+  if (q.size() != model_.nq) {
+    std::cerr << "[ArmAngleIK] Q size mismatch in extractJointValuesForROS" << std::endl;
+    return result;
+  }
+  
+  // Extract values for each joint (skip universe/floating base at index 0)
+  int q_idx = 0;
+  for (size_t j = 0; j < model_.joints.size(); ++j) {
+    int nq_this = model_.joints[j].nq();
+    
+    // Skip floating base (universe)
+    if (j == 0) {
+      q_idx += nq_this;
+      continue;
+    }
+    
+    // For regular joints, we take the first component (nv=1 for each active joint)
+    if (q_idx < q.size()) {
+      result.push_back(q(q_idx));
+    } else {
+      result.push_back(0.0);
+    }
+    
+    q_idx += nq_this;
+  }
+  
+  return result;
+}
+
 bool ArmAngleIK::forwardKinematics(const VectorXd& q, Eigen::Isometry3d& T_ee) {
   if (q.size() != model_.nq) {
     std::cerr << "[ArmAngleIK] Joint config size mismatch" << std::endl;

@@ -1,8 +1,6 @@
 import os
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
@@ -13,13 +11,6 @@ def generate_launch_description():
     # Read URDF file content
     with open(urdf_file, 'r') as f:
         robot_desc = f.read()
-
-    # Declare arguments
-    use_rviz = LaunchConfiguration('use_rviz')
-    declare_use_rviz_cmd = DeclareLaunchArgument(
-        'use_rviz',
-        default_value='true',
-        description='Use RViz for visualization')
 
     # Node: robot_state_publisher
     robot_state_publisher_node = Node(
@@ -43,13 +34,11 @@ def generate_launch_description():
         executable='rviz2',
         name='rviz2',
         arguments=['-d', rviz_config_dir],
-        condition=LaunchConfiguration('use_rviz'),
-        on_exit=None
+        output='screen'
     )
 
     # Create launch description
     ld = LaunchDescription([
-        declare_use_rviz_cmd,
         robot_state_publisher_node,
         ik_visualizer_node,
         rviz_node,

@@ -26,6 +26,11 @@ public:
   // 获取机器臂基本信息
   int getNDOF() const { return model_.nq; }
   int getNBodies() const { return model_.nbodies; }
+  std::vector<std::string> getJointNames() const;
+  int getNumActiveJoints() const;
+  
+  // Extract joint values from q vector by joint index
+  std::vector<double> extractJointValuesForROS(const Eigen::VectorXd& q) const;
 
   // 正向运动学
   bool forwardKinematics(const VectorXd& q, Eigen::Isometry3d& T_ee);
